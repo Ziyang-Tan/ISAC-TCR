@@ -101,7 +101,7 @@ df <- obj[[]] %>%
   as_tibble() %>%
   mutate(cell_type = case_when(
     is_gdT ~ 'gdT', # should come first, or some gdT cells will be assigned into CD4T/CD8T, 
-                    # since they are in those seurat clusters
+    # since they are in those seurat clusters
     seurat_clusters %in% c('1', '2', '5', '7', '9', '10', '16', '18', '19', '21', '22', '26') ~ 'CD4T',
     seurat_clusters %in% c('0', '3', '4', '6', '12', '14') ~ 'CD8T',
     TRUE ~ 'others'
@@ -119,7 +119,7 @@ SaveH5Seurat(obj,filename = 'data/seurat_results.h5Seurat', overwrite = T)
 
 # scTCR--------------------------------------------------------------------------------------------------
 # clonal info by scTCR
-
+cell_type <- read_csv(file = 'data/cell_types_manual.csv.gz')
 # process
 raw_tcr_merge <- left_join(raw_tcr, sample_tag, by = 'unique_index') %>%
   left_join(cell_type, by = 'unique_index') %>%
@@ -137,6 +137,11 @@ table_summary <- df %>% group_by(proj_id) %>% summarise(demultiplexed = n()) %>%
 )
 write_csv(table_summary, file = 'data/exp_quality_summary.csv')
 
+# at least Vb chain (for GLIPH)
+data_scTCR_vb <- raw_tcr_merge %>%
+  filter(!is.na(TCR_Beta_Delta_CDR3_Nucleotide_Dominant)) %>%
+  filter(!Sample_Name %in% c('Multiplet', 'Undetermined'))
+write_csv(data_scTCR_vb, file = 'data/scTCR_data_merge_vb.csv.gz')
 # clonal expansion
 data_scTCR <- raw_tcr_merge %>%
   filter(!is.na(TCR_Beta_Delta_CDR3_Nucleotide_Dominant)) %>%
@@ -147,7 +152,7 @@ data_scTCR <- raw_tcr_merge %>%
          CDR3aa_concat = paste0(TCR_Alpha_Gamma_CDR3_Translation_Dominant, '_', 
                                 TCR_Beta_Delta_CDR3_Translation_Dominant)) %>%
   mutate(clone_id = as.character(as.numeric(as.factor(CDR3_concat))))
-write_csv(data_scTCR, file = 'data/scTCR_data_merge.csv.gz')
+write_csv(data_scTCR, file = 'data/scTCR_data_merge_paired_chain.csv.gz')
 clone_id_map <- data_scTCR %>% select(CDR3_concat, clone_id) %>% unique()
 clone_exp <- data_scTCR %>%
   group_by(CDR3_concat, Sample_Name) %>%

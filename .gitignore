@@ -47,6 +47,8 @@ vignettes/*.pdf
 # figure and data folders
 data/
 figures/
+db/
+bin_GLIPH/
 
 
 
