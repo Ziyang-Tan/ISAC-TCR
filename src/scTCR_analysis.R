@@ -30,7 +30,8 @@ for (patient in names(sample_list)){
   fig_dir_clone <- file.path('figures', 'clonal expansion', patient)
   dir.create(fig_dir_clone, showWarnings = FALSE, recursive = TRUE)
   for (sub_name in c('CD4T', 'CD8T', 'gdT')){
-    
+    #patient <- 'ISAC31'
+    #sub_name <- 'CD8T'
     clone_exp_sub <- data_scTCR %>%
       filter(cell_type == sub_name) %>%
       # mutate(Sample_Name = paste0(proj_id, '_', Sample_Name)) %>% # when proj_wise plots are needed
@@ -42,8 +43,8 @@ for (patient in names(sample_list)){
     ggarrange(plotlist = g_list1, ncol = 3, nrow = 5) %>%
       ggexport(filename = file.path(fig_dir_clone, paste0(patient, '_clone_expansion_', sub_name, '.pdf')), 
                width = 10, height = 20)
-    #g <- clone_expansion_alluvium(patient, clone_exp_sub) + labs(title = paste0(patient, '_gdT'))
-    #ggsave(plot = g, filename = file.path(fig_dir_clone, paste0(patient, '_top_clone_changes_', sub_name, '.pdf')))
+    g <- clone_expansion_alluvium(patient, clone_exp_sub) + labs(title = paste0(patient, '_', sub_name))
+    ggsave(plot = g, filename = file.path(fig_dir_clone, paste0(patient, '_top_clone_changes_', sub_name, '.pdf')))
   }
 }
 

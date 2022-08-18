@@ -74,28 +74,49 @@ get_top_expansion_id <- function(clone_exp, top_number=10){
   top_clone_id <- clone_exp %>% 
     group_by(clone_id) %>% 
     summarise(max_count = max(clone_count)) %>% 
+    filter(max_count > 1) %>%
     slice_max(order_by = max_count, n = top_number) %>% 
     select(clone_id) %>% 
     unlist(use.names = F)
   return(top_clone_id)
 }
 
-clone_expansion_alluvium<- function(individual_name, clone_exp, top_number=10){
+get_large_expansion_id <- function(clone_exp, clone_thre=10){
+  top_clone_id <- clone_exp %>% 
+    group_by(clone_id) %>% 
+    summarise(max_count = max(clone_count)) %>% 
+    filter(max_count >= clone_thre) %>% 
+    select(clone_id) %>% 
+    unlist(use.names = F)
+  return(top_clone_id)
+}
+
+clone_expansion_alluvium<- function(individual_name, clone_exp){
   if (typeof(clone_exp$clone_id) != 'character'){
     clone_exp <- clone_exp %>% mutate(clone_id = as.character(clone_id))
   }
   clone_exp <- clone_exp  %>%
     tidyr::separate(Sample_Name, into = c('individual', 'time_point')) %>%
     filter(individual == individual_name)
-  top_clone_id <- get_top_expansion_id(clone_exp, top_number)
+  # QC
+  failed_exp <- clone_exp %>% group_by(time_point) %>% tally() %>% filter(n<10) %>% select(time_point) %>% unlist(use.names = F)
+  clone_exp <- clone_exp %>% filter(!time_point %in% failed_exp)
+  #
+  top_clone_id <- union(get_top_expansion_id(clone_exp), get_large_expansion_id(clone_exp))
   df <- clone_exp %>%
     group_by(time_point) %>%
     mutate(clone_ratio = clone_count/sum(clone_count)) %>%
-    filter(clone_id %in% top_clone_id) 
-  g <- ggplot(df, aes(x = time_point, stratum = clone_id, alluvium = clone_id, y= clone_ratio,fill = clone_id)) +
+    filter(clone_id %in% top_clone_id) %>%
+    mutate(relative_clone_ratio = clone_ratio/sum(clone_ratio)) %>%
+    mutate(time_point = factor(time_point, levels = gtools::mixedsort(unique(clone_exp$time_point))))
+  g <- ggplot(df, aes(x = time_point, stratum = clone_id, alluvium = clone_id, 
+                      #y= clone_ratio, 
+                      y= relative_clone_ratio,
+                      fill = clone_id, color=clone_id)) +
     geom_alluvium() +
     geom_stratum(size = 0.1) +
-    #theme(legend.position = "none")+
+    scale_fill_manual(values = wes_palette("Rushmore1", length(top_clone_id), type = "continuous"))+
+    theme(legend.position = "none")+
     labs(title = individual_name)
   return(g)
 }
