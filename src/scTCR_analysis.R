@@ -4,6 +4,8 @@ library(ggplot2)
 library(ggpubr)
 library(stringr)
 library(EnhancedVolcano)
+library(Seurat)
+library(SeuratDisk)
 source("src/clone_expansion_plots.R")
 
 # load data
@@ -12,9 +14,13 @@ data_scTCR <- read_csv('data/scTCR_data_merge_paired_chain.csv.gz') %>%
   mutate(seurat_clusters = as.character(seurat_clusters))
 clone_exp <- read_csv(file = 'data/clone_expansion.csv.gz')
 obj <- LoadH5Seurat('data/seurat_results.h5Seurat')
-cell_type <- read_csv('data/cell_types_manual.csv.gz')
+cell_type <- read_csv('data/cell_types_manual.csv.gz') %>% as.data.frame()
 rownames(cell_type) <- cell_type$unique_index
 obj$cell_type <- cell_type$cell_type
+clone_id <- data_scTCR %>% select(clone_id) %>% mutate(clone_id=as.character(clone_id)) %>% as.data.frame()
+rownames(clone_id) <- data_scTCR$unique_index
+obj$clone_id <- clone_id
+obj$patient_id <- sub('_.*$', '', obj$Sample_Name)
 
 # construct sample list
 
@@ -25,12 +31,12 @@ sample_list <-lapply(unique(tmp$patient), function(x){
 names(sample_list) <- unique(tmp$patient)
 
 # donut chart 
-
+top_clones <- data.frame()
 for (patient in names(sample_list)){
   fig_dir_clone <- file.path('figures', 'clonal expansion', patient)
   dir.create(fig_dir_clone, showWarnings = FALSE, recursive = TRUE)
   for (sub_name in c('CD4T', 'CD8T', 'gdT')){
-    #patient <- 'ISAC31'
+    #patient <- 'ISAC35'
     #sub_name <- 'CD8T'
     clone_exp_sub <- data_scTCR %>%
       filter(cell_type == sub_name) %>%
@@ -45,28 +51,70 @@ for (patient in names(sample_list)){
                width = 10, height = 20)
     g <- clone_expansion_alluvium(patient, clone_exp_sub) + labs(title = paste0(patient, '_', sub_name))
     ggsave(plot = g, filename = file.path(fig_dir_clone, paste0(patient, '_top_clone_changes_', sub_name, '.pdf')))
+    g <- clone_expansion_alluvium(patient, clone_exp_sub, clone_label = TRUE) + labs(title = paste0(patient, '_', sub_name))
+    ggsave(plot = g, filename = file.path(fig_dir_clone, paste0(patient, '_top_clone_changes_', sub_name, '_with_label.pdf')))
+    tmp <- data.frame(clone_id = unique(g$data$clone_id), sub_name = sub_name, patient = patient) %>%
+      left_join(ggplot_build(g)$data[[1]] %>% select(fill, stratum) %>% distinct() %>% rename(clone_id = stratum), by='clone_id')
+    top_clones <- rbind(top_clones, tmp)
   }
 }
+write_csv(top_clones, file = 'data/top_clones_all_timepoints.csv')
+
+
+
+
+
+
+
+
+
+
+# PCA of top clones (by patient)
+
+sub_name <- 'CD8T'
+top_clones <- read_csv(file = 'data/top_clones_all_timepoints.csv')
+
+#
+patient <- 'ISAC02'
+chosen_clones <- c(21963, 20878, 27993, 33659, 26805, 1709)
+obj_sub <- subset(obj, subset = clone_id %in% chosen_clones & cell_type == sub_name & patient_id == patient)
+obj_sub <- RunPCA(obj_sub, features = VariableFeatures(object = obj_sub))
+#PCAPlot(obj=obj_sub, group.by = 'clone_id')
+#cols = (top_clones %>% filter(clone_id %in% c(26805, 20878, 21963, 33659)))$fill)
+g1<- dittoSeq::dittoDimPlot(obj_sub, reduction.use = 'pca', var = 'clone_id', do.ellipse = T)
+#color.panel = (top_clones %>% filter(clone_id %in% chosen_clones))$fill)
+g2<- VizDimLoadings(obj_sub, dims = 1:2, reduction = "pca")
+ggarrange(g1, g2) %>% ggexport(filename = 'figures/ISAC02_CD8T_clone_RNA.pdf', width=12, height = 6)
+dittoSeq::dittoDimPlot(obj_sub, reduction.use = 'pca', var = 'Sample_Name', do.ellipse = T)
+ggsave(filename = 'figures/ISAC02_CD8T_clone_RNA_by_time.pdf')
+
+
+
+
+
+
+
+
 
 # public clone id
 
-clone_exp <- data_scTCR %>%
-  group_by(CDR3_concat, Sample_Name) %>%
-  summarise(clone_count = n()) %>%
-  ungroup() %>%
-  inner_join(clone_id_map, by='CDR3_concat')
-
-public_clone_id <- clone_exp %>% 
-  tidyr::separate(Sample_Name, into = c('individual', NA), remove = F) %>% 
-  select(individual, clone_id) %>% 
-  distinct() %>% 
-  group_by(clone_id) %>% 
-  tally() %>%
-  filter(n>1) %>%
-  select(clone_id) %>% unlist(use.names = F)
-
-public_clone <- clone_exp %>% filter(clone_id %in% public_clone_id)
-write_csv(public_clone, file = 'data/public_clone.csv')
+# clone_exp <- data_scTCR %>%
+#   group_by(CDR3_concat, Sample_Name) %>%
+#   summarise(clone_count = n()) %>%
+#   ungroup() %>%
+#   inner_join(clone_id_map, by='CDR3_concat')
+# 
+# public_clone_id <- clone_exp %>% 
+#   tidyr::separate(Sample_Name, into = c('individual', NA), remove = F) %>% 
+#   select(individual, clone_id) %>% 
+#   distinct() %>% 
+#   group_by(clone_id) %>% 
+#   tally() %>%
+#   filter(n>1) %>%
+#   select(clone_id) %>% unlist(use.names = F)
+# 
+# public_clone <- clone_exp %>% filter(clone_id %in% public_clone_id)
+# write_csv(public_clone, file = 'data/public_clone.csv')
 
 # DE analysis highly expanded vs others
 

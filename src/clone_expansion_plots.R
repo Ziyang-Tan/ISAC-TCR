@@ -3,10 +3,13 @@ library(ggalluvial)
 library(dplyr)
 library(ggrepel)
 library(wesanderson)
+library(ComplexHeatmap)
 
 #-----------
 # version 1.1
 # added type check for clone_id
+# version 1.2
+# some minor performance optimization
 #-----------
 
 
@@ -15,15 +18,16 @@ clone_expansion_donut <- function(sample_name, clone_exp){
   if (typeof(clone_exp$clone_id) != 'character'){
     clone_exp <- clone_exp %>% mutate(clone_id = as.character(clone_id))
   }
-  clone_exp <- clone_exp %>%
+  df <- clone_exp %>%
+    filter(Sample_Name == sample_name) %>%
     mutate(clone_id = case_when(
       clone_count == 1 ~ 'unique',
       clone_count >1 ~ clone_id
     )) %>%
-    arrange(desc(clone_count))
-  df <- clone_exp %>% 
-    filter(Sample_Name == sample_name) %>%
     arrange(clone_count)
+  #df <- clone_exp %>% 
+  #  filter(Sample_Name == sample_name) %>%
+  #  arrange(clone_count)
   df <- rbind(tibble(CDR3_concat='unique', 
                      Sample_Name = sample_name, 
                      clone_count = dim(df%>%filter(clone_id=='unique'))[1], 
@@ -91,7 +95,7 @@ get_large_expansion_id <- function(clone_exp, clone_thre=10){
   return(top_clone_id)
 }
 
-clone_expansion_alluvium<- function(individual_name, clone_exp){
+clone_expansion_alluvium<- function(individual_name, clone_exp, clone_label = F, top_mod = 'union', n=10){
   if (typeof(clone_exp$clone_id) != 'character'){
     clone_exp <- clone_exp %>% mutate(clone_id = as.character(clone_id))
   }
@@ -102,7 +106,16 @@ clone_expansion_alluvium<- function(individual_name, clone_exp){
   failed_exp <- clone_exp %>% group_by(time_point) %>% tally() %>% filter(n<10) %>% select(time_point) %>% unlist(use.names = F)
   clone_exp <- clone_exp %>% filter(!time_point %in% failed_exp)
   #
-  top_clone_id <- union(get_top_expansion_id(clone_exp), get_large_expansion_id(clone_exp))
+  if (top_mod == 'union'){
+    top_clone_id <- union(get_top_expansion_id(clone_exp), get_large_expansion_id(clone_exp))
+  } else if (top_mod == 'top'){
+    top_clone_id <- get_top_expansion_id(clone_exp, n)
+  } else if (top_mod == 'large'){
+    top_clone_id <- get_large_expansion_id(clone_exp, n)
+  } else {
+    stop('unkown top mod')
+  }
+  
   df <- clone_exp %>%
     group_by(time_point) %>%
     mutate(clone_ratio = clone_count/sum(clone_count)) %>%
@@ -111,13 +124,25 @@ clone_expansion_alluvium<- function(individual_name, clone_exp){
     mutate(time_point = factor(time_point, levels = gtools::mixedsort(unique(clone_exp$time_point))))
   g <- ggplot(df, aes(x = time_point, stratum = clone_id, alluvium = clone_id, 
                       #y= clone_ratio, 
-                      y= relative_clone_ratio,
+                      y = relative_clone_ratio,
                       fill = clone_id, color=clone_id)) +
     geom_alluvium() +
     geom_stratum(size = 0.1) +
     scale_fill_manual(values = wes_palette("Rushmore1", length(top_clone_id), type = "continuous"))+
     theme(legend.position = "none")+
     labs(title = individual_name)
+  if (clone_label) {
+    g <- g + geom_text_repel(aes(label = clone_id), stat = 'stratum', size = 4)
+  }
+  # determine trend (not finished)
+  df_complete <- df%>%select(time_point, clone_id,relative_clone_ratio)%>%
+    ungroup()%>% 
+    tidyr::complete(time_point, clone_id,fill = list(relative_clone_ratio=0))
+  tmp <- tidyr::pivot_wider(df_complete,names_from = time_point, values_from = relative_clone_ratio)
+  tmp2 <- tmp %>% select(-clone_id) %>% as.data.frame()
+  rownames(tmp2) <- tmp$clone_id
+  tmp2 <- t(scale(t(tmp2)))
+  Heatmap(tmp2, show_column_dend = F, column_order = c(levels(df_complete$time_point)))
   return(g)
 }
 
