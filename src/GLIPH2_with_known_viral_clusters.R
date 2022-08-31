@@ -10,7 +10,8 @@ data_TRB <- read_csv('data/TZY_TRB_annotated.csv')
 data_TRAB <- rbind(data_TRA, data_TRB) %>%
   mutate(CDR3aa_concat = paste0(cdr3a, '_', cdr3b),
          Sample_Name = paste0(sid, '_', condition),
-         cluster_id = paste0(index, '_', stringr::str_extract(pattern, '^.{4}')))
+         cluster_id = paste0(index, '_', stringr::str_extract(pattern, '^.{4}')),
+         virus_specific = !is.na(CDR3a) | !is.na(CDR3b))
 
 clone_exp <- read_csv(file = 'data/clone_expansion.csv.gz') %>%
   mutate(clone_id = as.character(clone_id),
@@ -20,8 +21,14 @@ top_clones <- read_csv('data/top_clones_all_timepoints.csv') %>%
   filter(sub_name == 'CD8T')
 nt2aa <- data_scTCR %>% select(CDR3_concat, CDR3aa_concat) %>% distinct()
 
+virus_specific_list <- left_join(
+  data_scTCR %>% select(CDR3aa_concat, clone_id) %>% distinct(),
+  data_TRAB %>% select(CDR3aa_concat, virus_specific) %>% distinct(), by = 'CDR3aa_concat') %>%
+  filter(virus_specific) %>%
+  select(clone_id) %>% 
+  distinct()
 
-#write_csv(data, 'data/clone_exp_with_known_specificity.csv')
+write_csv(virus_specific_list, 'data/virus_specific_clone_id.csv')
 
 # network of all samples
 pdf(paste0('figures/GLIPH_network/GLIPH_with_known_viral_clusters_clonecount', 3, '.pdf'))

@@ -95,7 +95,16 @@ get_large_expansion_id <- function(clone_exp, clone_thre=10){
   return(top_clone_id)
 }
 
-clone_expansion_alluvium<- function(individual_name, clone_exp, clone_label = F, top_mod = 'union', n=10){
+get_clone_exp_sub <- function(data_scTCR, sub_name){
+  clone_exp_sub <- data_scTCR %>%
+    filter(cell_type == sub_name) %>%
+    # mutate(Sample_Name = paste0(proj_id, '_', Sample_Name)) %>% # when proj_wise plots are needed
+    group_by(CDR3_concat, Sample_Name) %>%
+    summarise(clone_count = n()) %>%
+    ungroup()
+}
+
+clone_exp_alluvium_preparation <- function(individual_name, clone_exp, top_mod){
   if (typeof(clone_exp$clone_id) != 'character'){
     clone_exp <- clone_exp %>% mutate(clone_id = as.character(clone_id))
   }
@@ -121,29 +130,41 @@ clone_expansion_alluvium<- function(individual_name, clone_exp, clone_label = F,
     mutate(clone_ratio = clone_count/sum(clone_count)) %>%
     filter(clone_id %in% top_clone_id) %>%
     mutate(relative_clone_ratio = clone_ratio/sum(clone_ratio)) %>%
-    mutate(time_point = factor(time_point, levels = gtools::mixedsort(unique(clone_exp$time_point))))
+    mutate(time_point = factor(time_point, levels = gtools::mixedsort(unique(clone_exp$time_point)))) %>%
+    ungroup()
+  return(df)
+}
+
+
+clone_expansion_alluvium<- function(individual_name, clone_exp, clone_label = F, top_mod = 'union', n=10){
+  df <- clone_exp_alluvium_preparation(individual_name, clone_exp, top_mod)
+  
   g <- ggplot(df, aes(x = time_point, stratum = clone_id, alluvium = clone_id, 
                       #y= clone_ratio, 
                       y = relative_clone_ratio,
                       fill = clone_id, color=clone_id)) +
     geom_alluvium() +
     geom_stratum(size = 0.1) +
-    scale_fill_manual(values = wes_palette("Rushmore1", length(top_clone_id), type = "continuous"))+
+    scale_fill_manual(values = wes_palette("Rushmore1", length(unique(df$clone_id)), type = "continuous"))+
     theme(legend.position = "none")+
     labs(title = individual_name)
   if (clone_label) {
     g <- g + geom_text_repel(aes(label = clone_id), stat = 'stratum', size = 4)
   }
-  # determine trend (not finished)
+  return(g)
+}
+
+trend_determination_plot <- function(individual_name, clone_exp, top_mod='union'){
+
+  df <- clone_exp_alluvium_preparation(individual_name, clone_exp, top_mod)
+
   df_complete <- df%>%select(time_point, clone_id,relative_clone_ratio)%>%
-    ungroup()%>% 
+    ungroup()%>%
     tidyr::complete(time_point, clone_id,fill = list(relative_clone_ratio=0))
   tmp <- tidyr::pivot_wider(df_complete,names_from = time_point, values_from = relative_clone_ratio)
   tmp2 <- tmp %>% select(-clone_id) %>% as.data.frame()
   rownames(tmp2) <- tmp$clone_id
   tmp2 <- t(scale(t(tmp2)))
-  Heatmap(tmp2, show_column_dend = F, column_order = c(levels(df_complete$time_point)))
+  g <- Heatmap(tmp2, show_column_dend = F, column_order = c(levels(df_complete$time_point)))
   return(g)
 }
-
-

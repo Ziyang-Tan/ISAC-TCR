@@ -13,6 +13,8 @@ clone_id_map <- read_csv('data/clone_id_map.csv.gz')
 data_scTCR <- read_csv('data/scTCR_data_merge_paired_chain.csv.gz') %>%
   mutate(seurat_clusters = as.character(seurat_clusters))
 clone_exp <- read_csv(file = 'data/clone_expansion.csv.gz')
+virus_specific_list <- read_csv(file = 'data/virus_specific_clone_id.csv')
+
 obj <- LoadH5Seurat('data/seurat_results.h5Seurat')
 cell_type <- read_csv('data/cell_types_manual.csv.gz') %>% as.data.frame()
 rownames(cell_type) <- cell_type$unique_index
@@ -36,14 +38,9 @@ for (patient in names(sample_list)){
   fig_dir_clone <- file.path('figures', 'clonal expansion', patient)
   dir.create(fig_dir_clone, showWarnings = FALSE, recursive = TRUE)
   for (sub_name in c('CD4T', 'CD8T', 'gdT')){
-    #patient <- 'ISAC35'
-    #sub_name <- 'CD8T'
-    clone_exp_sub <- data_scTCR %>%
-      filter(cell_type == sub_name) %>%
-      # mutate(Sample_Name = paste0(proj_id, '_', Sample_Name)) %>% # when proj_wise plots are needed
-      group_by(CDR3_concat, Sample_Name) %>%
-      summarise(clone_count = n()) %>%
-      ungroup() %>%
+    patient <- 'ISAC02'
+    sub_name <- 'CD8T'
+    clone_exp_sub <- get_clone_exp_sub(data_scTCR, sub_name) %>%
       inner_join(clone_id_map, by='CDR3_concat')
     g_list1 <- lapply(sample_list[[patient]],function(x){clone_expansion_donut(x, clone_exp_sub)})
     ggarrange(plotlist = g_list1, ncol = 3, nrow = 5) %>%
@@ -60,16 +57,64 @@ for (patient in names(sample_list)){
 }
 write_csv(top_clones, file = 'data/top_clones_all_timepoints.csv')
 
+# for ISAC02
+# trend determination
+
+patient <- 'ISAC02'
+sub_name <- 'CD8T'
+clone_exp_sub <- get_clone_exp_sub(data_scTCR, sub_name) %>%
+  inner_join(clone_id_map, by='CDR3_concat')
+g <- clone_expansion_alluvium(patient, clone_exp_sub) + labs(title = paste0(patient, '_', sub_name)) + guides(fill='none', color='none')
+
+g2 <- trend_determination_plot('ISAC02', clone_exp_sub, top_mod='union')
+increase_clone <- c(31042, 24360, 1709, 29062, 33659, 21963)
+decrease_clone <- c(4834, 19762, 32933, 20882, 2490, 26712, 11642, 32213, 26805, 
+                    30159, 12573, 11556, 30108, 20878, 27993, 20975, 34986)
+
+# flow by trend
+df <- clone_exp_alluvium_preparation('ISAC02', clone_exp_sub, top_mod='union')
+df <- df %>% mutate(
+  trend = case_when(
+    clone_id %in% virus_specific_list$clone_id ~ 'virus_specific',
+    clone_id %in% increase_clone ~ 'increase',
+    clone_id %in% decrease_clone ~ 'decrease',
+    TRUE ~ 'other'
+  ))
+
+g3 <- ggplot(df, aes(x = time_point, stratum = clone_id, alluvium = clone_id, 
+                     #y= clone_ratio, 
+                     y = relative_clone_ratio,
+                     fill = trend, color=clone_id)) +
+  geom_alluvium() +
+  geom_stratum(size = 0.1) +
+  guides(color = "none") + # hide the legend of 'color'
+  #scale_fill_manual(values = wes_palette("Rushmore1", length(unique(df$trend)), type = "continuous"))+
+  #theme(legend.position = "none")+
+  labs(title = 'ISAC02')
+
+obj_sub <- subset(obj, subset = patient_id == 'ISAC02' & 
+                    clone_id %in% union(increase_clone, decrease_clone) &
+                    cell_type == 'CD8T')
+tmp <- obj_sub[[]] %>% left_join(df %>% select(clone_id, trend) %>% distinct(), by='clone_id') %>% select(trend)
+rownames(tmp) <- obj_sub[[]]$unique_index
+obj_sub$trend <- tmp
+Idents(obj_sub) <- 'trend'
+res <- FindMarkers(obj_sub, ident.1 = 'increase', ident.2 = 'decrease',
+                   logfc.threshold = 0)
+
+g4 <- EnhancedVolcano(res, x='avg_log2FC', y='p_val', lab = rownames(res), 
+                      pCutoff = 1e-04, FCcutoff = 1, drawConnectors = TRUE,
+                      selectLab = res %>% filter(abs(avg_log2FC) > 2 | p_val < 1e-04) %>% rownames(),
+                      title = paste0('CD8T', ' of ', 'ISAC02'),
+                      subtitle = 'increase vs decrease')
+
+ggarrange(g, g3, g4, ncol = 3, common.legend=T) %>% ggexport(filename = 'figures/ISAC02_trend_RNA.pdf', width = 20, height = 8)
+
+# add some GO?
 
 
 
-
-
-
-
-
-
-# PCA of top clones (by patient)
+ # PCA of top clones (by patient)
 
 sub_name <- 'CD8T'
 top_clones <- read_csv(file = 'data/top_clones_all_timepoints.csv')
@@ -87,13 +132,6 @@ g2<- VizDimLoadings(obj_sub, dims = 1:2, reduction = "pca")
 ggarrange(g1, g2) %>% ggexport(filename = 'figures/ISAC02_CD8T_clone_RNA.pdf', width=12, height = 6)
 dittoSeq::dittoDimPlot(obj_sub, reduction.use = 'pca', var = 'Sample_Name', do.ellipse = T)
 ggsave(filename = 'figures/ISAC02_CD8T_clone_RNA_by_time.pdf')
-
-
-
-
-
-
-
 
 
 # public clone id
