@@ -28,7 +28,8 @@ BD_load_sample_tag <- function(x, dir_path){
 }
 
 BD_load_gene_exp <- function(x, dir_path, norm_method){
-  path <- Sys.glob(paste0(dir_path, '/*/*/*', x, '_', norm_method, '_ReadsPerCell.csv'))
+  print(paste0('current processing file: ', x))
+  path <- Sys.glob(paste0(dir_path, '/*/*/*', x, '_', norm_method, '_MolsPerCell.csv')) # Reads or Mols PerCell
   read_csv(path, skip = 7, show_col_types = FALSE) %>%
     mutate(unique_index = paste0(x, '-', Cell_Index)) %>%
     select(-Cell_Index)

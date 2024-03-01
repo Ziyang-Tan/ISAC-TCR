@@ -14,15 +14,16 @@ data_scTCR <- read_csv('data/scTCR_data_merge_paired_chain.csv.gz') %>%
   mutate(seurat_clusters = as.character(seurat_clusters))
 clone_exp <- read_csv(file = 'data/clone_expansion.csv.gz')
 virus_specific_list <- read_csv(file = 'data/virus_specific_clone_id.csv')
+patient_info <- read_csv(file='data/ISAC_TCR_sample_info.csv')
 
-obj <- LoadH5Seurat('data/seurat_results.h5Seurat')
-cell_type <- read_csv('data/cell_types_manual.csv.gz') %>% as.data.frame()
-rownames(cell_type) <- cell_type$unique_index
-obj$cell_type <- cell_type$cell_type
-clone_id <- data_scTCR %>% select(clone_id) %>% mutate(clone_id=as.character(clone_id)) %>% as.data.frame()
-rownames(clone_id) <- data_scTCR$unique_index
-obj$clone_id <- clone_id
-obj$patient_id <- sub('_.*$', '', obj$Sample_Name)
+obj <- LoadH5Seurat('data/seurat_results_update.h5Seurat')
+# cell_type <- read_csv('data/cell_types_auto.csv.gz') %>% as.data.frame()
+# rownames(cell_type) <- cell_type$unique_index
+# obj$cell_type <- cell_type$cell_type
+# clone_id <- data_scTCR %>% select(clone_id) %>% mutate(clone_id=as.character(clone_id)) %>% as.data.frame()
+# rownames(clone_id) <- data_scTCR$unique_index
+# obj$clone_id <- clone_id
+# obj$patient_id <- sub('_.*$', '', obj$Sample_Name)
 
 # construct sample list
 
@@ -38,8 +39,8 @@ for (patient in names(sample_list)){
   fig_dir_clone <- file.path('figures', 'clonal expansion', patient)
   dir.create(fig_dir_clone, showWarnings = FALSE, recursive = TRUE)
   for (sub_name in c('CD4T', 'CD8T', 'gdT')){
-    patient <- 'ISAC02'
-    sub_name <- 'CD8T'
+    # patient <- 'ISAC112'
+    # sub_name <- 'CD4T'
     clone_exp_sub <- get_clone_exp_sub(data_scTCR, sub_name) %>%
       inner_join(clone_id_map, by='CDR3_concat')
     g_list1 <- lapply(sample_list[[patient]],function(x){clone_expansion_donut(x, clone_exp_sub)})
@@ -50,71 +51,19 @@ for (patient in names(sample_list)){
     ggsave(plot = g, filename = file.path(fig_dir_clone, paste0(patient, '_top_clone_changes_', sub_name, '.pdf')))
     g <- clone_expansion_alluvium(patient, clone_exp_sub, clone_label = TRUE) + labs(title = paste0(patient, '_', sub_name))
     ggsave(plot = g, filename = file.path(fig_dir_clone, paste0(patient, '_top_clone_changes_', sub_name, '_with_label.pdf')))
-    tmp <- data.frame(clone_id = unique(g$data$clone_id), sub_name = sub_name, patient = patient) %>%
-      left_join(ggplot_build(g)$data[[1]] %>% select(fill, stratum) %>% distinct() %>% rename(clone_id = stratum), by='clone_id')
-    top_clones <- rbind(top_clones, tmp)
+    if (length(unique(g$data$clone_id)) != 0){
+      tmp <- data.frame(clone_id = unique(g$data$clone_id), sub_name = sub_name, patient = patient) %>%
+        left_join(ggplot_build(g)$data[[1]] %>% select(fill, stratum) %>% distinct() %>% rename(clone_id = stratum), by='clone_id')
+      top_clones <- rbind(top_clones, tmp)
+    }
   }
 }
 write_csv(top_clones, file = 'data/top_clones_all_timepoints.csv')
 
-# for ISAC02
-# trend determination
-
-patient <- 'ISAC02'
-sub_name <- 'CD8T'
-clone_exp_sub <- get_clone_exp_sub(data_scTCR, sub_name) %>%
-  inner_join(clone_id_map, by='CDR3_concat')
-g <- clone_expansion_alluvium(patient, clone_exp_sub) + labs(title = paste0(patient, '_', sub_name)) + guides(fill='none', color='none')
-
-g2 <- trend_determination_plot('ISAC02', clone_exp_sub, top_mod='union')
-increase_clone <- c(31042, 24360, 1709, 29062, 33659, 21963)
-decrease_clone <- c(4834, 19762, 32933, 20882, 2490, 26712, 11642, 32213, 26805, 
-                    30159, 12573, 11556, 30108, 20878, 27993, 20975, 34986)
-
-# flow by trend
-df <- clone_exp_alluvium_preparation('ISAC02', clone_exp_sub, top_mod='union')
-df <- df %>% mutate(
-  trend = case_when(
-    clone_id %in% virus_specific_list$clone_id ~ 'virus_specific',
-    clone_id %in% increase_clone ~ 'increase',
-    clone_id %in% decrease_clone ~ 'decrease',
-    TRUE ~ 'other'
-  ))
-
-g3 <- ggplot(df, aes(x = time_point, stratum = clone_id, alluvium = clone_id, 
-                     #y= clone_ratio, 
-                     y = relative_clone_ratio,
-                     fill = trend, color=clone_id)) +
-  geom_alluvium() +
-  geom_stratum(size = 0.1) +
-  guides(color = "none") + # hide the legend of 'color'
-  #scale_fill_manual(values = wes_palette("Rushmore1", length(unique(df$trend)), type = "continuous"))+
-  #theme(legend.position = "none")+
-  labs(title = 'ISAC02')
-
-obj_sub <- subset(obj, subset = patient_id == 'ISAC02' & 
-                    clone_id %in% union(increase_clone, decrease_clone) &
-                    cell_type == 'CD8T')
-tmp <- obj_sub[[]] %>% left_join(df %>% select(clone_id, trend) %>% distinct(), by='clone_id') %>% select(trend)
-rownames(tmp) <- obj_sub[[]]$unique_index
-obj_sub$trend <- tmp
-Idents(obj_sub) <- 'trend'
-res <- FindMarkers(obj_sub, ident.1 = 'increase', ident.2 = 'decrease',
-                   logfc.threshold = 0)
-
-g4 <- EnhancedVolcano(res, x='avg_log2FC', y='p_val', lab = rownames(res), 
-                      pCutoff = 1e-04, FCcutoff = 1, drawConnectors = TRUE,
-                      selectLab = res %>% filter(abs(avg_log2FC) > 2 | p_val < 1e-04) %>% rownames(),
-                      title = paste0('CD8T', ' of ', 'ISAC02'),
-                      subtitle = 'increase vs decrease')
-
-ggarrange(g, g3, g4, ncol = 3, common.legend=T) %>% ggexport(filename = 'figures/ISAC02_trend_RNA.pdf', width = 20, height = 8)
-
-# add some GO?
+## jump to patient specific analysis
 
 
-
- # PCA of top clones (by patient)
+# PCA of top clones (by patient)
 
 sub_name <- 'CD8T'
 top_clones <- read_csv(file = 'data/top_clones_all_timepoints.csv')
@@ -136,23 +85,19 @@ ggsave(filename = 'figures/ISAC02_CD8T_clone_RNA_by_time.pdf')
 
 # public clone id
 
-# clone_exp <- data_scTCR %>%
-#   group_by(CDR3_concat, Sample_Name) %>%
-#   summarise(clone_count = n()) %>%
-#   ungroup() %>%
-#   inner_join(clone_id_map, by='CDR3_concat')
-# 
-# public_clone_id <- clone_exp %>% 
-#   tidyr::separate(Sample_Name, into = c('individual', NA), remove = F) %>% 
-#   select(individual, clone_id) %>% 
-#   distinct() %>% 
-#   group_by(clone_id) %>% 
-#   tally() %>%
-#   filter(n>1) %>%
-#   select(clone_id) %>% unlist(use.names = F)
-# 
-# public_clone <- clone_exp %>% filter(clone_id %in% public_clone_id)
-# write_csv(public_clone, file = 'data/public_clone.csv')
+public_clone_id <- clone_exp %>%
+  tidyr::separate(Sample_Name, into = c('individual', NA), remove = F) %>%
+  select(individual, clone_id) %>%
+  distinct() %>%
+  group_by(clone_id) %>%
+  tally() %>%
+  filter(n>1) %>%
+  select(clone_id) %>% unlist(use.names = F)
+
+public_clone <- clone_exp %>% 
+  filter(clone_id %in% public_clone_id) %>%
+  mutate(virus_specific = if_else(clone_id %in% virus_specific_list$clone_id, TRUE, FALSE))
+write_csv(public_clone, file = 'data/public_clone.csv')
 
 # DE analysis highly expanded vs others
 
@@ -195,5 +140,55 @@ for (patient in names(sample_list)){
   }
 }
 
+# DE analysis highly expanded vs others (baseline only, pour together)
 
+for (cur_subpop in c('CD4T', 'CD8T', 'gdT')){
+  #cur_subpop <- 'CD8T'
+  obj_sub <- subset(obj, subset = cell_type == cur_subpop & TCR_Paired_Chains)
+  high_expand_id <- (clone_exp %>% filter(clone_count >= 10,
+                                          grepl('(_v1$)|(_1$)', Sample_Name),
+                                          !clone_id %in% virus_specific_list
+  ) %>% 
+    select(clone_id) %>% unique())[[1]] # can include expansion from different sub type
+  high_expand_sc <- data_scTCR %>% filter(cell_type == cur_subpop, clone_id %in% high_expand_id) %>% 
+    tibble::add_column(highly_expand = 'highly_expanded') %>%
+    select(unique_index, highly_expand)
+  if (dim(high_expand_sc)[1] < 3) next
+  tmp <- obj_sub[[]] %>% left_join(high_expand_sc, by = 'unique_index') %>%
+    tidyr::replace_na(list(highly_expand='others'))
+  tmp2 <- tmp$highly_expand
+  names(tmp2) <- tmp$unique_index
+  obj_sub$highly_expand <- tmp2
+  Idents(obj_sub) <- 'highly_expand'
+  res <- FindMarkers(obj_sub, ident.1 = 'highly_expanded', ident.2 = 'others',
+                     logfc.threshold = 0)
+  
+  EnhancedVolcano(res, x='avg_log2FC', y='p_val_adj', lab = rownames(res), 
+                  pCutoff = 1e-04, FCcutoff = 0, drawConnectors = TRUE, arrowheads=F,
+                  selectLab = res %>% top_n(-40, p_val_adj) %>% rownames(),
+                  title = paste0(cur_subpop, ' of all baseline sample'),
+                  subtitle = 'highly_expanded cells vs others')
+  ggsave(paste0('figures/DE highly expanded vs others/', cur_subpop, ' of all baseline samples.pdf'), width = 15, height = 15)
+}
 
+# outcome
+
+obj_sub <- subset(obj, subset = Sample_Name %in% sapply(sample_list, function(x) x[length(x)]) & # endpoint
+                    cell_type == 'CD8T' &
+                    clone_id %in% get_expanded_id(clone_exp, 1)) 
+
+tmp <- obj_sub[[]] %>% left_join(patient_info, by='patient_id')
+tmp2 <- tmp$outcome
+names(tmp2) <- tmp$unique_index
+obj_sub$outcome <- tmp2
+Idents(obj_sub) <- 'outcome'
+res <- FindMarkers(obj_sub, ident.1 = 'good', ident.2 = 'bad',
+                   logfc.threshold = 0)
+EnhancedVolcano(res, x='avg_log2FC', y='p_val_adj', lab = rownames(res), 
+                pCutoff = 1e-04, FCcutoff = 0, drawConnectors = TRUE, arrowheads=F,
+                selectLab = res %>% top_n(-40, p_val_adj) %>% rownames(),
+                title = paste0('CD8T of end sample'),
+                subtitle = 'good vs bad')
+obj_sub <- RunPCA(obj_sub, features = VariableFeatures(object = obj_sub))
+dittoSeq::dittoDimPlot(obj_sub, reduction.use = 'pca', var = 'outcome')
+VizDimLoadings(obj_sub, dims = 1:2, reduction = "pca")

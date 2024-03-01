@@ -74,6 +74,12 @@ clone_expansion_donut <- function(sample_name, clone_exp){
   return(g)
 }
 
+get_expanded_id <- function(clone_exp, thre=1){
+  return (
+    (clone_exp %>% filter(clone_count > thre) %>% select(clone_id))$clone_id
+    )
+}
+
 get_top_expansion_id <- function(clone_exp, top_number=10){
   top_clone_id <- clone_exp %>% 
     group_by(clone_id) %>% 

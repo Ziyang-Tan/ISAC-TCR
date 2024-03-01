@@ -9,12 +9,17 @@ source('src/load_BD_scTCR.R')
 # parameters
 
 bulk_data_dir <- '/Users/tan/Library/CloudStorage/OneDrive-KI.SE/TCR_processed_data/bulk'
-bulk_proj_list <- c('P23556', 'P24864', 'P25060', 'P25755')
+bulk_proj_list <- c('P17466', 'P23556', 'P24864', 'P25060', 'P25755')
 sc_data_dir <- '/Users/tan/Library/CloudStorage/OneDrive-KI.SE/TCR_processed_data/single cell'
 sc_proj_list <- c('P23359_1001', 'P23359_1002', 'P23359_1003',
                   'P24851_1001', 'P24851_1002',
                   'P25158_1001',
-                  'P25651_1001', 'P25651_1002')
+                  'P25651_1001', 'P25651_1002',
+                  'P29012_1001', 'P29012_1002',
+                  'P29455_1001',
+                  'P29552_1001'
+                  )
+prior_label_path <- 'data/cell_types_manual.csv.gz' 
 
 # bulk TCR--------------------------------------------------------------------------------------------------
 
@@ -39,20 +44,32 @@ data_bulk <- lapply(sample_info_bulk$`NGI ID`, function(ngi_id){
       delim = '\t',
       show_col_types = FALSE
     ) %>%
-      tibble::add_column(ngi_id = ngi_id)
+      tibble::add_column(`NGI ID` = ngi_id)
   )
-}) %>% do.call(what = rbind)
+}) %>% do.call(what = rbind) %>% left_join(sample_info_bulk, by = 'NGI ID')
+
 
 # write to file
 write_csv(data_bulk, file = file.path('.', 'data', 'bulk_data.csv.gz'))
-write_csv(sample_info_bulk, file = file.path('.', 'data', 'bulk_info.csv.gz'))
+#write_csv(sample_info_bulk, file = file.path('.', 'data', 'bulk_info.csv.gz'))
 # BD Rhap--------------------------------------------------------------------------------------------------
 
 # read data
 
 raw_tcr <- lapply(sc_proj_list, BD_load_VDJ, dir_path = sc_data_dir) %>% do.call(what = rbind)
 sample_tag <- lapply(sc_proj_list, BD_load_sample_tag, dir_path = sc_data_dir) %>% do.call(what = rbind)
-raw_gene <- lapply(sc_proj_list, BD_load_gene_exp, dir_path = sc_data_dir, norm_method = 'DBEC') %>% do.call(what = rbind)
+
+raw_gene_list <- lapply(sc_proj_list, BD_load_gene_exp, dir_path = sc_data_dir, norm_method = 'DBEC')
+common_panel <- lapply(raw_gene_list, function(x) colnames(x)) %>% Reduce(f=intersect)
+raw_gene <- lapply(raw_gene_list, function(x) x[common_panel]) %>% do.call(rbind, .)
+
+# debug
+# raw_gene1 <- lapply(c('P29455_1001'), BD_load_gene_exp, dir_path = sc_data_dir, norm_method = 'DBEC') %>% do.call(rbind,.)
+# raw_gene2 <- lapply(c('P29012_1001'), BD_load_gene_exp, dir_path = sc_data_dir, norm_method = 'DBEC') %>% do.call(rbind,.)
+# 
+# data.frame(panel = colnames(raw_gene1)) %>% write_csv('/Users/tan/Desktop/tmp/panel1.csv')
+# data.frame(panel = colnames(raw_gene2)) %>% write_csv('/Users/tan/Desktop/tmp/panel2.csv')
+
 
 # scRNA--------------------------------------------------------------------------------------------------
 # process scRNA, determine major subsets
@@ -90,36 +107,61 @@ g2 <- DimPlot(obj, group.by='TCR_Paired_Chains')
 g3 <- DimPlot(obj, group.by='at_least_one_chain')
 g4 <- DimPlot(obj, group.by='is_gdT')
 g5 <- DimPlot(obj, group.by = 'orig.ident')
-ggarrange(g1,g2,g3,g4,g5) %>% ggexport(width = 15, height = 10, filename = 'figures/overview_all_cells.pdf')
+ggarrange(g1,g2,g3,g4,g5) %>% ggexport(width = 15, height = 10, filename = 'figures/overview_all_cells_3.pdf')
 FeaturePlot(obj, features = c('CD3E', 'CD4', 'CD8A')) %>%
-  ggsave(filename = 'figures/CD4_CD8_expression.pdf')
+  ggsave(filename = 'figures/CD4_CD8_expression_3.pdf')
 DoHeatmap(AverageExpression(obj, return.seurat = T), features = c('CD3E', 'CD4', 'CD8A')) %>%
-  ggsave(filename = 'figures/CD4_CD8_heatmap.pdf')
+  ggsave(filename = 'figures/CD4_CD8_heatmap_3.pdf')
+
+prior_label <- read_csv(file = 'data/cell_types_manual.csv.gz')
+
+df <- obj[[]] %>% 
+  as_tibble() %>% 
+  left_join(prior_label[c('unique_index', 'cell_type')]) %>%
+  cbind(obj@reductions$umap[[]])
+
+# ggplot(df, aes(x = UMAP_1, y = UMAP_2, color = cell_type)) +
+#   geom_point(size = 0.5)
+
+dic <- df %>% filter(!is.na(cell_type), cell_type != 'gdT') %>% group_by(cell_type, seurat_clusters) %>% tally() %>% group_by(seurat_clusters) %>% filter(n == max(n))
 
 # manual CD4T/CD8T discrimination
-df <- obj[[]] %>%
-  as_tibble() %>%
+# df <- obj[[]] %>%
+#   as_tibble() %>%
+#   mutate(cell_type = case_when(
+#     is_gdT ~ 'gdT', # should come first, or some gdT cells will be assigned into CD4T/CD8T, 
+#     # since they are in those seurat clusters
+#     seurat_clusters %in% c('1', '2', '5', '7', '9', '10', '16', '18', '19', '21', '22', '26') ~ 'CD4T',
+#     seurat_clusters %in% c('0', '3', '4', '6', '12', '14') ~ 'CD8T',
+#     TRUE ~ 'others'
+#   )) %>%
+#   cbind(obj@reductions$umap[[]])
+
+# auto labeling by prior labels
+df <- df %>%
   mutate(cell_type = case_when(
-    is_gdT ~ 'gdT', # should come first, or some gdT cells will be assigned into CD4T/CD8T, 
+    !is.na(cell_type) ~ cell_type, # do not change the prior labels
+    is_gdT ~ 'gdT', # should come first, or some gdT cells will be assigned into CD4T/CD8T,
     # since they are in those seurat clusters
-    seurat_clusters %in% c('1', '2', '5', '7', '9', '10', '16', '18', '19', '21', '22', '26') ~ 'CD4T',
-    seurat_clusters %in% c('0', '3', '4', '6', '12', '14') ~ 'CD8T',
-    TRUE ~ 'others'
-  )) %>%
-  cbind(obj@reductions$umap[[]])
+    seurat_clusters %in% (dic %>% filter(cell_type == 'CD4T'))$seurat_clusters ~ 'CD4T',
+    seurat_clusters %in% (dic %>% filter(cell_type == 'CD8T'))$seurat_clusters ~ 'CD8T',
+    seurat_clusters %in% (dic %>% filter(cell_type == 'others'))$seurat_clusters ~ 'others',
+    #TRUE ~ 'others'
+  ))
+
 ggplot(df, aes(x = UMAP_1, y = UMAP_2, color = cell_type)) +
   geom_point(size = 0.5)
-ggsave(filename = 'figures/CD4_CD8_types_manual.pdf')
+ggsave(filename = 'figures/CD4_CD8_types_auto.pdf')
 
 cell_type <- df %>% 
   select(unique_index, cell_type, UMAP_1, UMAP_2, seurat_clusters)
-write_csv(cell_type, file = 'data/cell_types_manual.csv.gz')
+write_csv(cell_type, file = 'data/cell_types_auto.csv.gz')
 
-SaveH5Seurat(obj,filename = 'data/seurat_results.h5Seurat', overwrite = T)
+# SaveH5Seurat(obj,filename = 'data/seurat_results.h5Seurat', overwrite = T)
 
 # scTCR--------------------------------------------------------------------------------------------------
 # clonal info by scTCR
-cell_type <- read_csv(file = 'data/cell_types_manual.csv.gz')
+cell_type <- read_csv(file = 'data/cell_types_auto.csv.gz')
 # process
 raw_tcr_merge <- left_join(raw_tcr, sample_tag, by = 'unique_index') %>%
   left_join(cell_type, by = 'unique_index') %>%
@@ -163,4 +205,29 @@ clone_exp <- data_scTCR %>%
 write_csv(clone_id_map, file = 'data/clone_id_map.csv.gz')
 write_csv(clone_exp, file = 'data/clone_expansion.csv.gz')
 
+# write Seurat obj with all info
+cell_type <- read.csv('data/cell_types_auto.csv.gz') %>% as.data.frame()
+rownames(cell_type) <- cell_type$unique_index
+obj$cell_type <- cell_type$cell_type
+clone_id <- data_scTCR %>% select(clone_id) %>% mutate(clone_id=as.character(clone_id)) %>% as.data.frame()
+rownames(clone_id) <- data_scTCR$unique_index
+obj$clone_id <- clone_id
+# fix an ISAC id
+tmp <- obj$Sample_Name
+tmp[tmp == 'ISAC_4'] = 'ISAC134_4'
+obj$Sample_Name = tmp
+obj$patient_id <- sub('_.*$', '', obj$Sample_Name)
+# assign tumor type
+tmp <- obj[[]] %>% select(patient_id) %>% mutate(
+  tumor_type = case_when(
+    patient_id %in% c('ISAC35', 'ISAC99') ~ 'Wilms',
+    patient_id %in% c('ISAC77') ~ 'Osteosarcoma',
+    patient_id %in% c('ISAC100', 'ISAC141', 'ISAC31', 'ISAC02') ~ 'High mutation Neuroblastoma',
+    patient_id %in% c('ISAC112', 'ISAC134', 'ISAC62', 'ISAC125', 'ISAC46') ~ 'Low mutation Neuroblastoma',
+    patient_id %in% c('ISAC81') ~ 'Other Neuroblastoma'
+  ))
+obj$tumor_type <- tmp$tumor_type
+
+
+SaveH5Seurat(obj,filename = 'data/seurat_results_update.h5Seurat', overwrite = T)
 

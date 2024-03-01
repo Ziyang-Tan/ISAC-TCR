@@ -128,5 +128,17 @@ plot.gliph <- function(data_TRA, data_TRB, clone_exp, nt2aa,
   legend('topleft', pch=21, pt.cex=1,
          legend = c(paste0('expanded clone (>', clone_thre, ')'), 'EBV', 'CMV', 'Influenza', 'InfluenzaA'), 
          pt.bg = c('#fffb96', '#ff71ce', '#01cdfe', '#05ffa1', '#b967ff'))
+  
+  sizeCut <- c(1,10,50,100)
+  sizeCutScale <- log(sizeCut)
+  
+  a <- legend('bottomleft',legend=unique(sizeCut),pt.cex=sizeCutScale/200,col='white',
+              pch=21, pt.bg='white')
+  x <- (a$text$x + a$rect$left) / 2
+  y <- a$text$y
+  symbols(x,y,circles=sizeCutScale/200,inches=FALSE,add=TRUE,bg='#fffb96')
+  
+  
+ 
 }
 

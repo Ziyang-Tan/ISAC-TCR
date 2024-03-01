@@ -50,7 +50,13 @@ figures/
 db/
 bin_GLIPH/
 slides/
+doc/
+figures_first8patient_backup/
+geo_submission/
+manuscript/
+sra_submission/
+demo/
 
-
+.RDataTmp*
 
 

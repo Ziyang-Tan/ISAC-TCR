@@ -50,6 +50,17 @@ for (name_i in unique(clone_exp$patient_id)){
   dev.off()
 }
 
+# network for baseline samples
+pdf(paste0('figures/GLIPH_network/GLIPH of baseline_clonecount1.pdf'))
+plot.gliph(data_TRA %>% filter(condition %in% c('1', 'v1')), 
+           data_TRB %>% filter(condition %in% c('1', 'v1')), 
+           clone_exp %>% filter(grepl('(_v1$)|(_1$)', Sample_Name)), 
+           nt2aa, 
+           clone_thre=1)
+           #labels = top_clones$clone_id)
+title(main='baseline samples')
+dev.off()
+
 # clonal expansion and changes on GLIPH cluster level
 
 cluster_exp <- data_TRAB %>% 
@@ -57,8 +68,7 @@ cluster_exp <- data_TRAB %>%
   summarise(clone_count=sum(frequency)) %>%
   rename(clone_id = cluster_id,
          CDR3_concat = pattern)
-  #mutate(patient = sub('_.*$', '', Sample_Name))
-
+#mutate(patient = sub('_.*$', '', Sample_Name))
 
 g_list <- lapply(unique(data_TRAB$sid), clone_expansion_alluvium, cluster_exp, top_mod = 'large', n=10)
 ggarrange(plotlist = g_list, ncol = 2, nrow = 2) %>%
