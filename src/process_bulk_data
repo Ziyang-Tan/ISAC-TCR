@@ -1,0 +1,34 @@
+library(dplyr)
+library(readr)
+
+bulk_data_dir <- "/Users/tan/Library/CloudStorage/OneDrive-KI.SE/TCR_processed_data/bulk"
+bulk_proj_list <- c("P17466", "P23556", "P24864", "P25060", "P25755")
+
+# read data
+sample_info_bulk <- lapply(bulk_proj_list, function(proj_id) {
+    return(
+        read_delim(
+            Sys.glob(file.path(bulk_data_dir, proj_id, "*sample_info.txt")),
+            delim = "\t",
+            show_col_types = FALSE
+        ) %>%
+            tibble::add_column(proj_id = proj_id)
+    )
+}) %>%
+    do.call(what = rbind) %>%
+    tidyr::separate(`User ID`, into = c("Sample_Name", "timepoint"), remove = F)
+
+data_bulk <- lapply(sample_info_bulk$`NGI ID`, function(ngi_id) {
+    return(
+        read_delim(
+            Sys.glob(file.path(bulk_data_dir, "*", "data", paste0(ngi_id, "*TRB*"))),
+            delim = "\t",
+            show_col_types = FALSE
+        ) %>%
+            tibble::add_column(`NGI ID` = ngi_id)
+    )
+}) %>%
+    do.call(what = rbind) %>%
+    left_join(sample_info_bulk, by = "NGI ID")
+
+write_csv(data_bulk, file = file.path(".", "data", "bulk_data.csv.gz"))
